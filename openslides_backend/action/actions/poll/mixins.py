@@ -113,6 +113,12 @@ class StopControl(CountdownControl, Action):
                 "entitled_group_ids",
             ],
         )
+        if poll["pollmethod"] == "STV":
+            self.handle_stv(instance, poll)
+        else:
+            self.handle_general_poll(instance, poll)
+
+    def handle_general_poll(self, instance: dict[str, Any], poll) -> None:
         # reset countdown given by meeting
         meeting = self.datastore.get(
             fqid_from_collection_and_id("meeting", poll["meeting_id"]),
@@ -205,7 +211,32 @@ class StopControl(CountdownControl, Action):
         instance["entitled_users_at_stop"] = self.get_entitled_users(
             poll | instance, meeting
         )
+    
+    def handle_stv(self, instance: dict[str, Any], poll) -> None:
+        print(instance)
+        print(poll)
+        meeting = self.datastore.get(
+            fqid_from_collection_and_id("meeting", poll["meeting_id"]),
+            [
+                "poll_couple_countdown",
+                "poll_countdown_id",
+                "users_enable_vote_weight",
+                "users_enable_vote_delegations",
+            ],
+        )
+        if meeting.get("poll_couple_countdown") and meeting.get("poll_countdown_id"):
+            self.control_countdown(meeting["poll_countdown_id"], CountdownCommand.RESET)
 
+        # stop poll in vote service and create vote objects
+        results = self.vote_service.stop(instance["id"])
+        action_data = []
+        votesvalid = Decimal("0.000000")
+        option_results: dict[int, dict[str, Decimal]] = defaultdict(
+            lambda: defaultdict(lambda: Decimal("0.000000"))
+        )  # maps options to their respective YNA sums
+        for ballot in results["votes"]:
+            user_token = get_user_token()
+        
     def get_entitled_users(
         self, poll: dict[str, Any], meeting: dict[str, Any]
     ) -> list[dict[str, Any]]:
