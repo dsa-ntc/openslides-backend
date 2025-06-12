@@ -4,6 +4,7 @@ from typing import Any, cast
 import math
 from collections import defaultdict
 from fractions import Fraction
+import random
 
 from openslides_backend.shared.typing import HistoryInformation
 
@@ -364,15 +365,16 @@ class StopControl(CountdownControl, Action):
             )
 
         return entitled_users
-    
-    def droop_quota(self, num_votes, num_seats):
-        return math.floor(num_votes / (num_seats + 1)) + 1
 
     def run_stv(self, ballots_by_rank, num_seats):
         """
         ballots_by_rank: list of dicts {candidate_id: rank}, where 1 is highest preference
         num_seats: number of winners to elect
         """
+
+        # List of rounds to track vote distribution
+        rounds = []
+
         # Convert ranked dicts into ordered preference lists
         processed_ballots = []
         for rank_dict in ballots_by_rank:
@@ -382,7 +384,7 @@ class StopControl(CountdownControl, Action):
             processed_ballots.append((Fraction(1), preference_list))
 
         total_votes = len(processed_ballots)
-        quota = self.droop_quota(total_votes, num_seats)
+        quota = math.floor(total_votes / (num_seats + 1)) + 1
 
         elected = []
         eliminated = set()
@@ -400,39 +402,99 @@ class StopControl(CountdownControl, Action):
                         break
             return tally
 
+        # Add initial vote counts as one round
+        original_candidates = {}
+        tally = count_votes()
+        for candidate in sorted(list(all_candidates)):
+                count = tally[candidate] if candidate in tally else 0
+                original_candidates[candidate] = {
+                    'startingVotes': count,
+                    'isElected': False,
+                    'isEliminated': False,
+                    'votesAdded': 0,
+                }
+        rounds.append(original_candidates)
+
         while len(elected) < num_seats:
             tally = count_votes()
 
-            # Elect anyone who meets quota
+            candidates_for_round = {}
+            # In each round, for each candidate, track:
+                # name/ID (key)
+                # starting % votes
+                # % votes added this round
+                # is elected this round?
+                # is eliminated this round?
+
+            # Populate defalut values for the round
+            for candidate in sorted(list(all_candidates)):
+                count = tally[candidate] if candidate in tally else 0
+                candidates_for_round[candidate] = {
+                    'startingVotes': count,
+                    'isElected': False,
+                    'isEliminated': False,
+                    'votesAdded': 0,
+                }
+
+            candidates_over_threshold = []
+            # Find all candidates who meet quota
             for candidate, count in tally.items():
                 if count >= quota and candidate not in elected:
-                    elected.append(candidate)
-                    surplus = count - quota
-                    if surplus > 0:
-                        transfer_value = surplus / count
-                        new_ballots = []
-                        for weight, prefs in processed_ballots:
-                            if prefs and prefs[0] == candidate:
-                                new_prefs = [c for c in prefs[1:] if c in get_active_candidates()]
-                                if new_prefs:
-                                    new_ballots.append((weight * transfer_value, new_prefs))
-                            else:
-                                new_ballots.append((weight, prefs))
-                        processed_ballots = new_ballots
-                    break
+                    candidates_over_threshold.append((candidate, count))
+
+            if len(candidates_over_threshold) > 0:
+                # Select candidate with highest count to elect
+                candidate, count = sorted(candidates_over_threshold, key=lambda x: -x[1])[0]
+
+                # Get other candidates over the threshold so new votes are not distributed to them
+                other_qualified_candidates = set(map(lambda x: x[0], candidates_over_threshold))
+
+                elected.append(candidate)
+                print("\n" + candidate)
+                surplus = count - quota
+                if surplus > 0:
+                    print(float(surplus))
+                    transfer_value = surplus / count
+                    new_ballots = []
+                    for weight, prefs in processed_ballots:
+                        if prefs and prefs[0] == candidate:
+                            # Transfer proportional excess votes from this candidate to each voter's next choice candidate.
+                            # Do not distribute to candidates who have been elected, eliminated, or crossed the threshold but are not yet elected
+                            new_prefs = [c for c in prefs[1:] if c in get_active_candidates() and c not in other_qualified_candidates]
+                            if new_prefs:
+                                print(str(float(weight * transfer_value)), new_prefs[0])
+                                new_ballots.append((weight * transfer_value, new_prefs))
+                                candidates_for_round[new_prefs[0]]['votesAdded'] += weight * transfer_value
+                        else:
+                            new_ballots.append((weight, prefs))
+                    processed_ballots = new_ballots
+                    candidates_for_round[candidate]['isElected'] = True
+
             else:
                 # No one reached quota: eliminate lowest
                 if not tally:
                     break
-                lowest = min(get_active_candidates(), key=lambda c: (tally[c], c))
+
+                active_candidates = get_active_candidates()
+                # Get all candidates with lowest value, break ties randomly
+                min_value = tally[min(active_candidates, key=lambda c: (tally[c], c))]
+                lowest_candidates = [c for c in active_candidates if tally[c] == min_value]
+                lowest = random.choice(lowest_candidates)
+                
                 eliminated.add(lowest)
+                candidates_for_round[lowest]['isEliminated'] = True
 
                 new_ballots = []
                 for weight, prefs in processed_ballots:
+                    # Transfer proportional excess votes from this candidate to each voter's next choice candidate.
                     new_prefs = [c for c in prefs if c != lowest]
                     if new_prefs:
+                        candidates_for_round[new_prefs[0]]['votesAdded'] += weight
                         new_ballots.append((weight, new_prefs))
                 processed_ballots = new_ballots
+
+            # Add candidate data for round
+            rounds.append(candidates_for_round)
 
             # Elect all remaining candidates if only as many remain as seats left
             if len(get_active_candidates()) + len(elected) == num_seats:
