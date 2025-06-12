@@ -450,10 +450,8 @@ class StopControl(CountdownControl, Action):
                 other_qualified_candidates = set(map(lambda x: x[0], candidates_over_threshold))
 
                 elected.append(candidate)
-                print("\n" + candidate)
                 surplus = count - quota
                 if surplus > 0:
-                    print(float(surplus))
                     transfer_value = surplus / count
                     new_ballots = []
                     for weight, prefs in processed_ballots:
@@ -462,7 +460,6 @@ class StopControl(CountdownControl, Action):
                             # Do not distribute to candidates who have been elected, eliminated, or crossed the threshold but are not yet elected
                             new_prefs = [c for c in prefs[1:] if c in get_active_candidates() and c not in other_qualified_candidates]
                             if new_prefs:
-                                print(str(float(weight * transfer_value)), new_prefs[0])
                                 new_ballots.append((weight * transfer_value, new_prefs))
                                 candidates_for_round[new_prefs[0]]['votesAdded'] += weight * transfer_value
                         else:
