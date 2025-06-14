@@ -447,7 +447,7 @@ class StopControl(CountdownControl, Action):
                 candidate, count = sorted(candidates_over_threshold, key=lambda x: -x[1])[0]
 
                 # Get other candidates over the threshold so new votes are not distributed to them
-                other_qualified_candidates = set(map(lambda x: x[0], candidates_over_threshold))
+                qualified_candidates = set(map(lambda x: x[0], candidates_over_threshold))
 
                 elected.append(candidate)
                 surplus = count - quota
@@ -456,9 +456,9 @@ class StopControl(CountdownControl, Action):
                     new_ballots = []
                     for weight, prefs in processed_ballots:
                         if prefs and prefs[0] == candidate:
-                            # Transfer proportional excess votes from this candidate to each voter's next choice candidate.
+                            # Transfer proportional excess votes from this candidate to each voter's next choice candidate
                             # Do not distribute to candidates who have been elected, eliminated, or crossed the threshold but are not yet elected
-                            new_prefs = [c for c in prefs[1:] if c in get_active_candidates() and c not in other_qualified_candidates]
+                            new_prefs = [c for c in prefs[1:] if c in get_active_candidates() and c not in qualified_candidates]
                             if new_prefs:
                                 new_ballots.append((weight * transfer_value, new_prefs))
                                 candidates_for_round[new_prefs[0]]['votesAdded'] += weight * transfer_value
@@ -483,7 +483,7 @@ class StopControl(CountdownControl, Action):
 
                 new_ballots = []
                 for weight, prefs in processed_ballots:
-                    # Transfer proportional excess votes from this candidate to each voter's next choice candidate.
+                    # Transfer proportional excess votes from this candidate to each voter's next choice candidate
                     new_prefs = [c for c in prefs if c != lowest]
                     if new_prefs:
                         candidates_for_round[new_prefs[0]]['votesAdded'] += weight
